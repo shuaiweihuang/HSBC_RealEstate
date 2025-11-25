@@ -5,6 +5,7 @@ Production-ready FastAPI service with single/batch inference and CSV upload supp
 
 from fastapi import FastAPI, HTTPException, File, UploadFile
 from fastapi.responses import StreamingResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Any, Dict, List, Union
 import joblib
@@ -27,6 +28,14 @@ app = FastAPI(
         {"name": "model", "description": "Model information and explainability"},
         {"name": "inference", "description": "Prediction endpoints"},
     ],
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3000"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Global state
