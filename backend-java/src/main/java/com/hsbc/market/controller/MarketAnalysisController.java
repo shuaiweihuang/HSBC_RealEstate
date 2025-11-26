@@ -1,78 +1,76 @@
 package com.hsbc.market.controller;
 
-import com.hsbc.market.model.MarketStatistics;
-import com.hsbc.market.model.TrendDataPoint;
-import com.hsbc.market.service.ExportService;
+import com.hsbc.market.dto.response.ApiResponse;
+import com.hsbc.market.dto.response.MarketStatsResponse; // <-- 新增導入
+import com.hsbc.market.dto.response.TrendDataResponse;
 import com.hsbc.market.service.MarketAnalysisService;
-import com.itextpdf.text.DocumentException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.http.HttpHeaders;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Map;
 
 /**
- * 處理所有市場分析相關的 API 請求。
+ * 市場分析控制器
  */
 @RestController
 @RequestMapping("/api/market-analysis")
 @RequiredArgsConstructor
 @Slf4j
+@CrossOrigin(origins = "*")
 public class MarketAnalysisController {
-
+    
     private final MarketAnalysisService marketAnalysisService;
-    private final ExportService exportService;
-
-    /**
-     * 獲取市場趨勢資料 (例如：歷年平均價格變化)。
-     * @return 趨勢資料點列表
-     */
-    @GetMapping("/trend")
-    public ResponseEntity<List<TrendDataPoint>> getMarketTrend() {
-        log.info("Received request for market trend data.");
-        List<TrendDataPoint> trend = marketAnalysisService.getMarketTrend();
-        return ResponseEntity.ok(trend);
-    }
-
-    /**
-     * 獲取市場整體統計資料 (例如：平均價格、總交易量)。
-     * @return 市場統計資料物件
-     */
-    @GetMapping("/stats")
-    public ResponseEntity<MarketStatistics> getMarketStatistics() {
-        log.info("Received request for market statistics.");
-        MarketStatistics stats = marketAnalysisService.getMarketStatistics();
-        return ResponseEntity.ok(stats);
-    }
     
     /**
-     * 導出市場分析報告為 PDF 檔案。
-     * @return PDF 檔案的位元組陣列
+     * 獲取市場統計數據
+     * * @return 市場統計數據
      */
-    @GetMapping("/export/pdf")
-    public ResponseEntity<byte[]> exportReport() {
-        log.info("Received request to export PDF report.");
-        try {
-            byte[] pdfBytes = exportService.generateMarketReportPdf();
-            
-            HttpHeaders headers = new HttpHeaders();
-            headers.setContentType(MediaType.APPLICATION_PDF);
-            // 讓瀏覽器下載檔案，檔名為 market_report.pdf
-            headers.setContentDispositionFormData("filename", "market_report.pdf");
-            headers.setContentLength(pdfBytes.length);
-
-            return new ResponseEntity<>(pdfBytes, headers, HttpStatus.OK);
-
-        } catch (DocumentException e) {
-            log.error("Error creating PDF report", e);
-            return new ResponseEntity<>(null, HttpStatus.INTERNAL_SERVER_ERROR);
-        }
+    @GetMapping("/stats")
+    public ResponseEntity<ApiResponse<MarketStatsResponse>> getMarketStatistics() {
+        log.info("Received request for market statistics");
+        
+        // 臨時使用 MarketStatsResponse 實例化數據
+        MarketStatsResponse stats = MarketStatsResponse.builder()
+            .averagePrice(260000.0)
+            .medianPrice(250000.0)
+            .totalVolume(50L)
+            .priceChangePercent(2.5)
+            .averageSquareFootage(1800.0)
+            .oldestYear(1950)
+            .newestYear(2022)
+            .build();
+        
+        return ResponseEntity.ok(
+            ApiResponse.success("Market statistics retrieved successfully", stats)
+        );
+    }
+    
+    @GetMapping("/trend")
+    public ResponseEntity<ApiResponse<List<TrendDataResponse>>> getMarketTrend() {
+        log.info("Received request for market trend");
+        
+        List<TrendDataResponse> trend = marketAnalysisService.getMarketTrend();
+        
+        return ResponseEntity.ok(
+            ApiResponse.success("Market trend data retrieved successfully", trend)
+        );
+    }
+    
+    @GetMapping("/segments/bedrooms")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> getStatsByBedrooms() {
+        log.info("Received request for bedroom segments");
+        
+        Map<String, Object> segments = Map.of(
+            "2_bedrooms", Map.of("count", 15, "avgPrice", 185000),
+            "3_bedrooms", Map.of("count", 25, "avgPrice", 255000),
+            "4_bedrooms", Map.of("count", 10, "avgPrice", 375000)
+        );
+        
+        return ResponseEntity.ok(
+            ApiResponse.success("Bedroom segments retrieved successfully", segments)
+        );
     }
 }
-

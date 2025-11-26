@@ -1,92 +1,299 @@
 package com.hsbc.market.service;
 
-import com.hsbc.market.model.MarketStatistics;
-import com.hsbc.market.model.TrendDataPoint;
-import io.netty.channel.ChannelOption;
-import io.netty.handler.timeout.ReadTimeoutHandler;
-import io.netty.handler.timeout.WriteTimeoutHandler;
+import com.hsbc.market.client.MlApiClient;
+import com.hsbc.market.dto.response.MarketStatsResponse;
+import com.hsbc.market.dto.response.TrendDataResponse;
+import com.hsbc.market.exception.DataNotFoundException;
+import com.hsbc.market.model.Property;
+import com.hsbc.market.repository.PropertyRepository;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.cache.annotation.Cacheable;
-import org.springframework.core.ParameterizedTypeReference; // FIX: 導入 Spring 專用的 ParameterizedTypeReference
-import org.springframework.http.client.reactive.ReactorClientHttpConnector;
 import org.springframework.stereotype.Service;
-import org.springframework.web.reactive.function.client.WebClient;
-import reactor.netty.http.client.HttpClient;
 
-import java.time.Duration;
-import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * 負責所有市場分析邏輯，包括從 ML API 獲取資料。
+ * 市場分析服務
+ * 提供市場統計、趨勢分析等功能
  */
 @Service
+@RequiredArgsConstructor
 @Slf4j
 public class MarketAnalysisService {
+    
+    private final PropertyRepository propertyRepository;
+    private final MlApiClient mlApiClient;
+    
+    /**
+     * 獲取市場整體統計
+     */
+    @Cacheable(value = "marketStats", key = "'overall'")
+    public MarketStatsResponse getMarketStatistics() {
+        log.info("Calculating market statistics");
+        
+        List<Property> properties = propertyRepository.findAll();
+        
+        // 檢查數據是否載入
+        if (properties.isEmpty()) {
+            throw new DataNotFoundException("No property data available for statistics calculation.");
+        }
+        
+        // 過濾掉價格無效或為 null 的物業，確保計算的準確性
+        List<Property> validProperties = properties.stream()
+                .filter(p -> p.getPrice() != null && !p.getPrice().isNaN() && p.getPrice() > 0)
+                .collect(Collectors.toList());
 
-    private final WebClient webClient;
+        if (validProperties.isEmpty()) {
+            throw new DataNotFoundException("No valid property data available after filtering.");
+        }
+        
+        // 計算統計數據
+        double avgPrice = validProperties.stream()
+                .mapToDouble(Property::getPrice)
+                .average()
+                .orElse(0.0);
+        
+        double medianPrice = calculateMedian(validProperties.stream()
+                .mapToDouble(Property::getPrice)
+                .sorted()
+                .toArray());
+        
+        long totalVolume = validProperties.size();
+        
+        double avgSquareFootage = validProperties.stream()
+                .filter(p -> p.getSquareFootage() != null)
+                .mapToDouble(Property::getSquareFootage)
+                .average()
+                .orElse(0.0);
+        
+        Integer oldestYear = validProperties.stream()
+                .filter(p -> p.getYearBuilt() != null)
+                .map(Property::getYearBuilt)
+                .min(Integer::compare)
+                .orElse(null);
 
-    // 注入 ML API 的基礎 URL
-    public MarketAnalysisService(@Value("${ml.api.base.url}") String mlApiBaseUrl) {
-        // 設定 Netty 以調整連線逾時
-        HttpClient httpClient = HttpClient.create()
-                .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 5000) // 連線逾時 5 秒
-                .responseTimeout(Duration.ofSeconds(20)) // 總體響應逾時 20 秒
-                .doOnConnected(conn -> 
-                    conn.addHandlerLast(new ReadTimeoutHandler(20, TimeUnit.SECONDS))
-                        .addHandlerLast(new WriteTimeoutHandler(20, TimeUnit.SECONDS)));
-
-        this.webClient = WebClient.builder()
-                .baseUrl(mlApiBaseUrl)
-                .clientConnector(new ReactorClientHttpConnector(httpClient))
+        Integer newestYear = validProperties.stream()
+                .filter(p -> p.getYearBuilt() != null)
+                .map(Property::getYearBuilt)
+                .max(Integer::compare)
+                .orElse(null);
+        
+        // 計算價格變化百分比
+        double priceChangePercent = calculatePriceChangePercent(validProperties, oldestYear, newestYear);
+        
+        return MarketStatsResponse.builder()
+                .averagePrice(avgPrice)
+                .medianPrice(medianPrice)
+                .totalVolume(totalVolume)
+                .priceChangePercent(priceChangePercent)
+                .averageSquareFootage(avgSquareFootage)
+                .oldestYear(oldestYear)
+                .newestYear(newestYear)
                 .build();
     }
-
+    
     /**
-     * 獲取市場趨勢資料。
-     * @return 市場趨勢資料點的列表
+     * 獲取市場趨勢數據 (按年份平均價格)
      */
-    @Cacheable("marketTrend")
-    public List<TrendDataPoint> getMarketTrend() {
-        log.info("Fetching market trend from ML API...");
+    @Cacheable(value = "marketTrend", key = "'byYear'")
+    public List<TrendDataResponse> getMarketTrend() {
+        log.info("Calculating market trend by year");
+        
+        List<Property> properties = propertyRepository.findAll();
+        
+        if (properties.isEmpty()) {
+            throw new DataNotFoundException("No property data available for trend calculation.");
+        }
+        
         try {
-            // ML API 端點： /market-trend
-            List<TrendDataPoint> trend = webClient.get()
-                    .uri("/market-trend")
-                    .retrieve()
-                    // FIX: 必須使用 ParameterizedTypeReference 來正確處理泛型列表
-                    .bodyToMono(new ParameterizedTypeReference<List<TrendDataPoint>>() {}) 
-                    .block(); // 阻塞等待結果 (在 Spring Service 中是常見做法)
+            // **關鍵修復點: 過濾掉 yearBuilt 為 null 的物業，避免 Collectors.groupingBy 拋出 NullPointerException**
+            List<Property> validTrendProperties = properties.stream()
+                    .filter(p -> p.getYearBuilt() != null && p.getPrice() != null && p.getPrice() > 0)
+                    .collect(Collectors.toList());
+            
+            if (validTrendProperties.isEmpty()) {
+                throw new DataNotFoundException("No valid property data with YearBuilt and Price available for trend calculation.");
+            }
 
-            return trend != null ? trend : Collections.emptyList();
+            // 1. 按 yearBuilt 分組
+            Map<Integer, List<Property>> propertiesByYear = validTrendProperties.stream()
+                    .collect(Collectors.groupingBy(Property::getYearBuilt));
+
+            // 2. 計算每個年份的趨勢數據
+            return propertiesByYear.entrySet().stream()
+                    .map(entry -> {
+                        Integer year = entry.getKey();
+                        List<Property> yearProperties = entry.getValue();
+
+                        // 計算平均價格
+                        double avgPrice = yearProperties.stream()
+                                .mapToDouble(Property::getPrice)
+                                .average()
+                                .orElse(0.0);
+
+                        // 構建響應
+                        return TrendDataResponse.builder()
+                                .year(year)
+                                .label(String.valueOf(year))
+                                .avgPrice(avgPrice)
+                                .count((long) yearProperties.size())
+                                .build();
+                    })
+                    .sorted(Comparator.comparing(TrendDataResponse::getYear))
+                    .collect(Collectors.toList());
+        } catch (DataNotFoundException e) {
+            // 重新拋出 DataNotFoundException
+            throw e;
         } catch (Exception e) {
-            log.error("Failed to fetch market trend from ML API", e);
-            return Collections.emptyList(); // 發生錯誤時返回空列表
+            log.error("Error calculating market trend, possibly due to bad data: {}", e.getMessage(), e);
+            // 重新拋出為運行時異常，讓 GlobalExceptionHandler 處理 500
+            throw new IllegalStateException("Market trend calculation failed: Invalid data detected in the group. Please check logs.", e);
+        }
+    }
+    
+    /**
+     * 獲取按臥室數量分組的統計數據
+     */
+    @Cacheable(value = "marketSegments", key = "'byBedrooms'")
+    public Map<Integer, MarketStatsResponse> getStatsByBedrooms() {
+        log.info("Calculating market segments by bedrooms");
+        
+        List<Property> properties = propertyRepository.findAll();
+        
+        if (properties.isEmpty()) {
+            throw new DataNotFoundException("No property data available for segmentation calculation.");
+        }
+        
+        try {
+            // 過濾掉 bedrooms 為 null 的物業
+            List<Property> validSegmentProperties = properties.stream()
+                    .filter(p -> p.getBedrooms() != null)
+                    .collect(Collectors.toList());
+
+            if (validSegmentProperties.isEmpty()) {
+                 throw new DataNotFoundException("No valid property data with Bedrooms available for segment calculation.");
+            }
+
+            return validSegmentProperties.stream()
+                    .collect(Collectors.groupingBy(Property::getBedrooms))
+                    .entrySet().stream()
+                    .collect(Collectors.toMap(
+                            Map.Entry::getKey,
+                            entry -> calculateStatsForGroup(entry.getValue())
+                    ));
+        } catch (DataNotFoundException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("Error calculating market segments by bedrooms: {}", e.getMessage(), e);
+            throw new IllegalStateException("Market segment calculation failed: Invalid data detected.", e);
         }
     }
 
     /**
-     * 獲取市場整體統計資料。
-     * @return 市場統計資料物件
+     * 計算中位數
      */
-    @Cacheable("marketStats")
-    public MarketStatistics getMarketStatistics() {
-        log.info("Fetching overall market statistics from ML API...");
-        try {
-            // ML API 端點： /market-stats
-            MarketStatistics stats = webClient.get()
-                    .uri("/market-stats")
-                    .retrieve()
-                    .bodyToMono(MarketStatistics.class)
-                    .block();
-
-            return stats != null ? stats : new MarketStatistics();
-        } catch (Exception e) {
-            log.error("Failed to fetch market statistics from ML API", e);
-            return new MarketStatistics(); // 發生錯誤時返回空物件
+    private double calculateMedian(double[] data) {
+        if (data == null || data.length == 0) return 0.0;
+        int n = data.length;
+        if (n % 2 == 1) {
+            return data[n / 2];
+        } else {
+            return (data[n / 2 - 1] + data[n / 2]) / 2.0;
         }
+    }
+
+    /**
+     * 計算價格變化百分比
+     */
+    private double calculatePriceChangePercent(List<Property> properties, Integer oldestYear, Integer newestYear) {
+        if (oldestYear == null || newestYear == null || oldestYear.equals(newestYear)) return 0.0;
+        
+        // 確保 oldestYear 和 newestYear 在列表的 YearBuilt 中找到
+        if (properties.stream().filter(p -> p.getYearBuilt() != null).map(Property::getYearBuilt).noneMatch(oldestYear::equals)) return 0.0;
+        if (properties.stream().filter(p -> p.getYearBuilt() != null).map(Property::getYearBuilt).noneMatch(newestYear::equals)) return 0.0;
+        
+        double oldAvg = properties.stream()
+                .filter(p -> p.getYearBuilt() != null && p.getYearBuilt().equals(oldestYear))
+                .mapToDouble(Property::getPrice)
+                .average()
+                .orElse(0.0);
+        
+        double newAvg = properties.stream()
+                .filter(p -> p.getYearBuilt() != null && p.getYearBuilt().equals(newestYear))
+                .mapToDouble(Property::getPrice)
+                .average()
+                .orElse(0.0);
+        
+        if (oldAvg == 0) return 0.0;
+        return ((newAvg - oldAvg) / oldAvg) * 100;
+    }
+    
+    /**
+     * 統計特定年份的物業數量 (未在當前方法中使用)
+     */
+    private long countPropertiesByYear(List<Property> properties, Integer year) {
+        return properties.stream()
+                .filter(p -> p.getYearBuilt() != null && p.getYearBuilt().equals(year))
+                .count();
+    }
+    
+    /**
+     * 計算特定組的統計數據
+     */
+    private MarketStatsResponse calculateStatsForGroup(List<Property> properties) {
+        // 過濾掉價格無效或為 null 的物業
+        List<Property> validProperties = properties.stream()
+                .filter(p -> p.getPrice() != null && !p.getPrice().isNaN() && p.getPrice() > 0)
+                .collect(Collectors.toList());
+
+        if (validProperties.isEmpty()) {
+            // 如果組內沒有有效數據，返回零值統計
+            return MarketStatsResponse.builder().totalVolume(0L).build();
+        }
+        
+        double avgPrice = validProperties.stream()
+                .mapToDouble(Property::getPrice)
+                .average()
+                .orElse(0.0);
+        
+        double medianPrice = calculateMedian(validProperties.stream()
+                .mapToDouble(Property::getPrice)
+                .sorted()
+                .toArray());
+        
+        // 計算其他統計數據
+        double avgSquareFootage = validProperties.stream()
+                .filter(p -> p.getSquareFootage() != null)
+                .mapToDouble(Property::getSquareFootage)
+                .average()
+                .orElse(0.0);
+        
+        Integer oldestYear = validProperties.stream()
+                .filter(p -> p.getYearBuilt() != null)
+                .map(Property::getYearBuilt)
+                .min(Integer::compare)
+                .orElse(null);
+
+        Integer newestYear = validProperties.stream()
+                .filter(p -> p.getYearBuilt() != null)
+                .map(Property::getYearBuilt)
+                .max(Integer::compare)
+                .orElse(null);
+        
+        double priceChangePercent = calculatePriceChangePercent(validProperties, oldestYear, newestYear);
+        
+        return MarketStatsResponse.builder()
+                .averagePrice(avgPrice)
+                .medianPrice(medianPrice)
+                .totalVolume((long) validProperties.size())
+                .priceChangePercent(priceChangePercent)
+                .averageSquareFootage(avgSquareFootage)
+                .oldestYear(oldestYear)
+                .newestYear(newestYear)
+                .build();
     }
 }
-

@@ -1,6 +1,6 @@
 services:
   # ----------------------------------------
-  # Redis Cache (Required for Java API dependencies)
+  # Redis Cache
   # ----------------------------------------
   redis:
     image: redis:7-alpine
@@ -14,25 +14,24 @@ services:
       retries: 5
 
   # ----------------------------------------
-  # Python ML API (FastAPI)
+  # Python ML API
   # ----------------------------------------
   ml-api:
     build:
       context: ./backend-python
       dockerfile: Dockerfile
-    image: hsbc-ml-api:final 
+    image: hsbc-ml-api:final
     ports:
       - "8000:8000"
     restart: unless-stopped
     healthcheck:
-      # 確保使用 127.0.0.1 進行容器內健康檢查
       test: ["CMD-SHELL", "curl -f http://127.0.0.1:8000/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
 
   # ----------------------------------------
-  # Java Market API (Spring Boot)
+  # Java Market API
   # ----------------------------------------
   java-api:
     build:
@@ -42,27 +41,26 @@ services:
     ports:
       - "8080:8080"
     restart: unless-stopped
-    # 關鍵修正: 新增健康檢查，以便 portal 服務可以等待它
+
+    # ACTUATOR 健康檢查
     healthcheck:
-      # 使用 wget 檢查 Actuator 健康端點 /actuator/health
       test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/actuator/health || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
-    # Java API 依賴 Redis 和 ML API 的健康狀態
+
     depends_on:
       redis:
         condition: service_healthy
       ml-api:
         condition: service_healthy
-    # 配置 Spring Boot 連線到 Redis 服務和 ML API 服務
+
     environment:
       - SPRING_DATA_REDIS_HOST=redis
-      # 關鍵修正: 讓 Java 知道 ML API 在 Docker 內部網路的位置
       - ML_API_BASE_URL=http://ml-api:8000
 
   # ----------------------------------------
-  # Frontend Portal (Next.js)
+  # Next.js Portal
   # ----------------------------------------
   portal:
     build:
@@ -72,10 +70,15 @@ services:
     ports:
       - "3000:3000"
     restart: unless-stopped
+
     depends_on:
       java-api:
         condition: service_healthy
-    # 配置 Next.js 連線到 Java API
+      ml-api:
+        condition: service_healthy
+
     environment:
-      - NEXT_PUBLIC_JAVA_API_URL=http://java-api:8080
       - NODE_ENV=production
+      - NEXT_PUBLIC_JAVA_API_URL=http://java-api:8080
+      - NEXT_PUBLIC_ML_API_URL=http://ml-api:8000
+
