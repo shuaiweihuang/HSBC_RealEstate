@@ -15,7 +15,7 @@ import argparse
 import json
 from pathlib import Path
 from typing import Optional
-import datetime # Added: Import the datetime module
+import datetime
 
 import joblib
 import numpy as np
@@ -23,7 +23,7 @@ import pandas as pd
 from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import Ridge
 from sklearn.metrics import mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split # Added: for dataset splitting
+from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
@@ -40,7 +40,7 @@ ALLOWED_FEATURES = {
 }
 
 # Get the current year dynamically from the system time
-CURRENT_YEAR = datetime.datetime.now().year # Changed: Dynamically set current year
+CURRENT_YEAR = datetime.datetime.now().year
 
 
 def hpml_train(
@@ -62,26 +62,59 @@ def hpml_train(
     df = pd.read_csv(data_path)
     
     # === Feature Engineering: Convert to Age of House ===
-    # CURRENT_YEAR is now dynamically set above
     df["age_of_house"] = CURRENT_YEAR - df["year_built"]
+    
+    # === ADDED: Additional Feature Engineering ===
+    # Interaction features
+    if "square_footage" in df.columns and "bedrooms" in df.columns:
+        df["size_per_bedroom"] = df["square_footage"] / (df["bedrooms"] + 1)
+    
+    if "bathrooms" in df.columns and "bedrooms" in df.columns:
+        df["bathroom_bedroom_ratio"] = df["bathrooms"] / (df["bedrooms"] + 1)
+    
+    # Combination features
+    if "bedrooms" in df.columns and "bathrooms" in df.columns:
+        df["total_rooms"] = df["bedrooms"] + df["bathrooms"]
+    
+    if "school_rating" in df.columns and "distance_to_city_center" in df.columns:
+        df["quality_score"] = df["school_rating"] * (1 / (df["distance_to_city_center"] + 0.1))
+    
+    # Polynomial features
+    if "square_footage" in df.columns:
+        df["square_footage_sq"] = df["square_footage"] ** 2
+    
+    if "lot_size" in df.columns:
+        df["lot_size_sq"] = df["lot_size"] ** 2
+    
+    # Categorical features
+    if "age_of_house" in df.columns:
+        df["is_new_house"] = (df["age_of_house"] <= 5).astype(int)
+    
+    if "square_footage" in df.columns:
+        median_size = df["square_footage"].median()
+        df["large_house"] = (df["square_footage"] > median_size).astype(int)
+    # === END ADDED ===
     
     # Determine features to use
     target = target_name or "price"
-    # Remove "year_built" and add "age_of_house" to the allowed list
+    # MODIFIED: Expand allowed features list with engineered features
     ALLOWED_FEATURES_TRAIN = ALLOWED_FEATURES.union({"age_of_house"}) - {"year_built"}
+    # Add engineered features to allowed list
+    ALLOWED_FEATURES_TRAIN = ALLOWED_FEATURES_TRAIN.union({
+        "size_per_bedroom", "bathroom_bedroom_ratio", "total_rooms", "quality_score",
+        "square_footage_sq", "lot_size_sq", "is_new_house", "large_house"
+    })
     
     # Select only allowed features
     X_raw = df[list(ALLOWED_FEATURES_TRAIN)].copy()
     y = df[target]
 
     # === Data Split: Train/Test Separation (80/20) ===
-    # Split the dataset into training and testing sets
     X_train, X_test, y_train, y_test = train_test_split(
         X_raw, y, test_size=0.2, random_state=42
     )
 
     # 2. Preprocessing Pipeline Definition
-    # Features that need scaling (all numerical features used)
     features_to_scale = list(ALLOWED_FEATURES_TRAIN) 
     
     # Categorical features (none currently, but structure is preserved)
@@ -93,7 +126,7 @@ def hpml_train(
             ('num', StandardScaler(), features_to_scale),
             # ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
         ],
-        remainder='drop'  # Drop features not in the list
+        remainder='drop'
     )
 
     # 4. Full Pipeline (Preprocessing + Model)
@@ -102,7 +135,7 @@ def hpml_train(
 
     # 5. Train the model
     print("Starting model training...")
-    pipeline.fit(X_train, y_train) # Fit only on the training set
+    pipeline.fit(X_train, y_train)
 
     # 6. Evaluate on Train and Test sets
     
@@ -122,27 +155,36 @@ def hpml_train(
     # Extract coefficients from the fitted Ridge model
     coefs = pipeline['regressor'].coef_
     coefficients = dict(zip(scaled_feature_names, coefs))
+    
+    # ADDED: Sort coefficients by absolute value to find most important features
+    coef_importance = sorted(coefficients.items(), key=lambda x: abs(x[1]), reverse=True)
 
     # 8. Create Metadata
     meta = {
         "target": target,
         "n_samples": len(X_raw),
-        "train_samples": len(X_train), # Added: Number of training samples
-        "test_samples": len(X_test),   # Added: Number of testing samples
+        "train_samples": len(X_train),
+        "test_samples": len(X_test),
         "features_used": list(X_raw.columns),
         "train_mean_price": y_train.mean(),
-        # Baseline MAE is calculated using the training mean price to predict the test set
         "baseline_naive_mae": mean_absolute_error(y_test, [y_train.mean()] * len(y_test)), 
         "metrics_on_training_set": {
             "mae": train_mae,
             "r2": train_r2,
         },
-        "metrics_on_test_set": { # Added: Test set metrics
+        "metrics_on_test_set": {
             "mae": test_mae,
             "r2": test_r2,
         },
+        # ADDED: Calculate improvement over baseline
+        "improvement_over_baseline_pct": ((mean_absolute_error(y_test, [y_train.mean()] * len(y_test)) - test_mae) / mean_absolute_error(y_test, [y_train.mean()] * len(y_test))) * 100,
         "model": str(model),
         "coefficients": coefficients,
+        # ADDED: Top 5 most important features
+        "top_5_important_features": [
+            {"feature": name.replace("num__", ""), "coefficient": float(coef)} 
+            for name, coef in coef_importance[:5]
+        ]
     }
 
     # 9. Save model bundle
@@ -169,8 +211,14 @@ def hpml_train(
     print(f"Training MAE        : {train_mae:,.2f}")
     print(f"R² score (Train)    : {train_r2:.4f}")
     print("--------------------------------------------------")
-    print(f"TESTING MAE         : {test_mae:,.2f}") # Displaying Test set MAE
-    print(f"R² score (Test)     : {test_r2:.4f}") # Displaying Test set R²
+    print(f"TESTING MAE         : {test_mae:,.2f}")
+    print(f"R² score (Test)     : {test_r2:.4f}")
+    # ADDED: Show improvement and top features
+    print(f"Baseline MAE        : {meta['baseline_naive_mae']:,.2f}")
+    print(f"Improvement         : {meta['improvement_over_baseline_pct']:.1f}%")
+    print("\nTop 5 Important Features:")
+    for i, item in enumerate(meta['top_5_important_features'], 1):
+        print(f"  {i}. {item['feature']}: {item['coefficient']:,.2f}")
     print("="*60)
 
 
@@ -181,7 +229,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data",
         type=Path,
-        default=Path("data/raw/HousePriceDataset.csv"),
+        default=Path("../data/raw/HousePriceDataset.csv"),
         help="Path to training dataset (CSV)"
     )
     parser.add_argument(
