@@ -1,9 +1,6 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { Loader2, Zap, HeartHandshake, XCircle, BarChart3 } from "lucide-react";
+import { Zap, HeartHandshake, XCircle, BarChart3 } from "lucide-react";
 
 // --- Type Definitions ---
 type Status = "healthy" | "unhealthy";
@@ -24,18 +21,6 @@ interface MarketStats {
   newestYear: number;
 }
 
-const schema = z.object({
-  square_footage: z.coerce.number().min(500).max(10000),
-  bedrooms: z.coerce.number().int().min(1).max(10),
-  bathrooms: z.coerce.number().min(1).max(10),
-  year_built: z.coerce.number().min(1900).max(new Date().getFullYear()),
-  lot_size: z.coerce.number().min(1000).max(50000),
-  distance_to_city_center: z.coerce.number().min(0).max(100),
-  school_rating: z.coerce.number().min(1).max(10),
-});
-
-type FormData = z.infer<typeof schema>;
-
 // --- StatusPill Component ---
 const StatusPill: React.FC<ApiStatus> = ({ status, message, port }) => {
   const color = status === "healthy" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700";
@@ -51,24 +36,6 @@ const StatusPill: React.FC<ApiStatus> = ({ status, message, port }) => {
 
 // --- Main Application Component ---
 export default function Home() {
-  const {
-    register,
-    handleSubmit,
-    formState: { errors },
-    reset,
-  } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: {
-      square_footage: 1800,
-      bedrooms: 3,
-      bathrooms: 2,
-      year_built: 2005,
-      lot_size: 7000,
-      distance_to_city_center: 4.5,
-      school_rating: 8.5,
-    },
-  });
-
   const [pythonApiStatus, setPythonApiStatus] = useState<ApiStatus>({ 
     status: "unhealthy", 
     message: "Loading...", 
@@ -80,8 +47,6 @@ export default function Home() {
     port: 8080 
   });
   const [marketStats, setMarketStats] = useState<MarketStats | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [result, setResult] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const PYTHON_API_URL = typeof window !== 'undefined' 
@@ -131,7 +96,6 @@ export default function Home() {
       const response = await fetch(`${JAVA_API_URL}/api/market-analysis/stats`);
       if (response.ok) {
         const apiResponse = await response.json();
-        // Java API returns ApiResponse<MarketStatsResponse>, data is in the data field
         setMarketStats(apiResponse.data);
       } else {
         const errorText = await response.text();
@@ -161,44 +125,6 @@ export default function Home() {
     };
   }, [checkPythonApiStatus, checkJavaApiStatus, fetchMarketStats]);
 
-  // Form submission handler
-  const onSubmit = async (data: FormData) => {
-    setLoading(true);
-    setError(null);
-    setResult(null);
-
-    if (javaApiStatus.status !== "healthy") {
-      setError("Java API is not ready yet. Please try again later.");
-      setLoading(false);
-      return;
-    }
-    
-    try {
-      const response = await fetch(`${JAVA_API_URL}/api/properties/what-if`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(data),
-      });
-
-      if (!response.ok) {
-        const errorData = await response.json();
-        throw new Error(errorData.message || `HTTP error! Status: ${response.status}`);
-      }
-
-      const apiResponse = await response.json();
-      setResult(apiResponse.data?.predictedPrice || apiResponse.predicted_price);
-    } catch (e) {
-      console.error(e);
-      setError(`Prediction failed: ${e instanceof Error ? e.message : 'Unknown error'}`);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const isFormDisabled = loading || javaApiStatus.status !== "healthy";
-
   return (
     <div className="min-h-screen bg-gray-50 p-8 md:p-12 lg:p-16">
       <header className="max-w-7xl mx-auto mb-10">
@@ -208,20 +134,22 @@ export default function Home() {
         <p className="text-xl text-gray-600">Property valuation system combining machine learning with real-time data</p>
       </header>
 
-      <main className="max-w-7xl mx-auto grid grid-cols-1 lg:grid-cols-3 gap-10">
-        {/* API Status & Market Data */}
-        <div className="lg:col-span-1 bg-white p-8 shadow-2xl rounded-3xl space-y-8">
+      <main className="max-w-7xl mx-auto">
+        {/* API Status & Market Data Card */}
+        <div className="bg-white p-8 shadow-2xl rounded-3xl space-y-8">
+          {/* API Status Section */}
           <div>
             <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
               <Zap className="text-yellow-500 w-8 h-8" />
               API Service Status
             </h2>
-            <div className="space-y-4">
+            <div className="flex flex-wrap gap-4">
               <StatusPill {...pythonApiStatus} />
               <StatusPill {...javaApiStatus} />
             </div>
           </div>
 
+          {/* Market Data Section */}
           <div>
             <h2 className="text-2xl font-bold text-gray-800 mb-6 flex items-center gap-3">
               <BarChart3 className="text-blue-500 w-8 h-8" />
@@ -236,209 +164,63 @@ export default function Home() {
             )}
 
             {marketStats ? (
-              <div className="space-y-4">
-                <div className="p-4 bg-red-50 rounded-xl">
-                  <p className="text-sm font-semibold text-red-600">Total Properties</p>
-                  <p className="text-3xl font-extrabold text-red-800">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+                <div className="p-6 bg-red-50 rounded-xl">
+                  <p className="text-sm font-semibold text-red-600 mb-2">Total Properties</p>
+                  <p className="text-4xl font-extrabold text-red-800">
                     {marketStats.totalVolume.toLocaleString()}
                   </p>
                 </div>
 
-                <div className="p-4 bg-gray-50 rounded-xl">
-                  <p className="text-sm font-semibold text-gray-600">Average Price</p>
-                  <p className="text-3xl font-extrabold text-gray-800">
+                <div className="p-6 bg-gray-50 rounded-xl">
+                  <p className="text-sm font-semibold text-gray-600 mb-2">Average Price</p>
+                  <p className="text-4xl font-extrabold text-gray-800">
                     ${Math.round(marketStats.averagePrice).toLocaleString()}
                   </p>
                 </div>
 
-                <div className="p-4 bg-blue-50 rounded-xl">
-                  <p className="text-sm font-semibold text-blue-600">Median Price</p>
-                  <p className="text-3xl font-extrabold text-blue-800">
+                <div className="p-6 bg-blue-50 rounded-xl">
+                  <p className="text-sm font-semibold text-blue-600 mb-2">Median Price</p>
+                  <p className="text-4xl font-extrabold text-blue-800">
                     ${Math.round(marketStats.medianPrice).toLocaleString()}
                   </p>
                 </div>
 
-                <div className="p-4 bg-green-50 rounded-xl">
-                  <p className="text-sm font-semibold text-green-600">Price Change</p>
-                  <p className="text-3xl font-extrabold text-green-800">
+                <div className="p-6 bg-green-50 rounded-xl">
+                  <p className="text-sm font-semibold text-green-600 mb-2">Price Change</p>
+                  <p className="text-4xl font-extrabold text-green-800">
                     {marketStats.priceChangePercent > 0 ? '+' : ''}
                     {marketStats.priceChangePercent.toFixed(2)}%
                   </p>
                 </div>
 
-                <div className="pt-4 border-t">
-                  <p className="text-sm text-gray-600">
-                    Average Area: {Math.round(marketStats.averageSquareFootage).toLocaleString()} sq ft
-                  </p>
-                  <p className="text-sm text-gray-600">
-                    Construction Years: {marketStats.oldestYear} - {marketStats.newestYear}
-                  </p>
+                <div className="md:col-span-2 lg:col-span-4 pt-6 border-t">
+                  <div className="flex flex-wrap gap-8">
+                    <div>
+                      <p className="text-sm text-gray-600 font-semibold mb-1">Average Area</p>
+                      <p className="text-2xl font-bold text-gray-800">
+                        {Math.round(marketStats.averageSquareFootage).toLocaleString()} sq ft
+                      </p>
+                    </div>
+                    <div>
+                      <p className="text-sm text-gray-600 font-semibold mb-1">Construction Period</p>
+                      <p className="text-2xl font-bold text-gray-800">
+                        {marketStats.oldestYear} - {marketStats.newestYear}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               </div>
             ) : (
-              <p className="text-gray-500">Waiting for market data from Java API...</p>
+              <div className="text-center py-12">
+                <div className="animate-pulse">
+                  <div className="h-4 bg-gray-200 rounded w-3/4 mx-auto mb-4"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/2 mx-auto"></div>
+                </div>
+                <p className="text-gray-500 mt-4">Loading market data from Java API...</p>
+              </div>
             )}
           </div>
-        </div>
-        
-        {/* Prediction Form & Results */}
-        <div className="lg:col-span-2 bg-white p-10 shadow-2xl rounded-3xl">
-          <h2 className="text-3xl font-bold text-gray-800 mb-8">Property Details</h2>
-
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
-            {error && (
-              <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
-                <p className="font-bold">Connection or Prediction Error</p>
-                <p>{error}</p>
-              </div>
-            )}
-            
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-              {/* Square Footage */}
-              <div>
-                <label htmlFor="square_footage" className="block text-lg font-medium text-gray-700 mb-2">
-                  Total Area (sq ft)
-                </label>
-                <input
-                  id="square_footage"
-                  type="number"
-                  step="any"
-                  {...register("square_footage")}
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-red-500 focus:ring-red-500 transition"
-                  disabled={isFormDisabled}
-                />
-                {errors.square_footage && (
-                  <p className="text-red-500 text-sm mt-1">{errors.square_footage.message}</p>
-                )}
-              </div>
-
-              {/* Bedrooms */}
-              <div>
-                <label htmlFor="bedrooms" className="block text-lg font-medium text-gray-700 mb-2">
-                  Bedrooms
-                </label>
-                <input
-                  id="bedrooms"
-                  type="number"
-                  step="1"
-                  {...register("bedrooms")}
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-red-500 focus:ring-red-500 transition"
-                  disabled={isFormDisabled}
-                />
-                {errors.bedrooms && <p className="text-red-500 text-sm mt-1">{errors.bedrooms.message}</p>}
-              </div>
-
-              {/* Bathrooms */}
-              <div>
-                <label htmlFor="bathrooms" className="block text-lg font-medium text-gray-700 mb-2">
-                  Bathrooms
-                </label>
-                <input
-                  id="bathrooms"
-                  type="number"
-                  step="0.5"
-                  {...register("bathrooms")}
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-red-500 focus:ring-red-500 transition"
-                  disabled={isFormDisabled}
-                />
-                {errors.bathrooms && <p className="text-red-500 text-sm mt-1">{errors.bathrooms.message}</p>}
-              </div>
-
-              {/* Year Built */}
-              <div>
-                <label htmlFor="year_built" className="block text-lg font-medium text-gray-700 mb-2">
-                  Year Built
-                </label>
-                <input
-                  id="year_built"
-                  type="number"
-                  step="1"
-                  {...register("year_built")}
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-red-500 focus:ring-red-500 transition"
-                  disabled={isFormDisabled}
-                />
-                {errors.year_built && <p className="text-red-500 text-sm mt-1">{errors.year_built.message}</p>}
-              </div>
-
-              {/* Lot Size */}
-              <div>
-                <label htmlFor="lot_size" className="block text-lg font-medium text-gray-700 mb-2">
-                  Lot Size (sq ft)
-                </label>
-                <input
-                  id="lot_size"
-                  type="number"
-                  step="any"
-                  {...register("lot_size")}
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-red-500 focus:ring-red-500 transition"
-                  disabled={isFormDisabled}
-                />
-                {errors.lot_size && <p className="text-red-500 text-sm mt-1">{errors.lot_size.message}</p>}
-              </div>
-
-              {/* Distance to City Center */}
-              <div>
-                <label htmlFor="distance_to_city_center" className="block text-lg font-medium text-gray-700 mb-2">
-                  Distance to City Center (miles)
-                </label>
-                <input
-                  id="distance_to_city_center"
-                  type="number"
-                  step="any"
-                  {...register("distance_to_city_center")}
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-red-500 focus:ring-red-500 transition"
-                  disabled={isFormDisabled}
-                />
-                {errors.distance_to_city_center && (
-                  <p className="text-red-500 text-sm mt-1">{errors.distance_to_city_center.message}</p>
-                )}
-              </div>
-
-              {/* School Rating */}
-              <div className="md:col-span-2">
-                <label htmlFor="school_rating" className="block text-lg font-medium text-gray-700 mb-2">
-                  School District Rating (1-10)
-                </label>
-                <input
-                  id="school_rating"
-                  type="number"
-                  step="0.1"
-                  {...register("school_rating")}
-                  className="w-full px-6 py-4 border-2 border-gray-300 rounded-xl text-lg focus:border-red-500 focus:ring-red-500 transition"
-                  disabled={isFormDisabled}
-                />
-                {errors.school_rating && (
-                  <p className="text-red-500 text-sm mt-1">{errors.school_rating.message}</p>
-                )}
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={isFormDisabled}
-              className="w-full bg-red-600 text-white py-6 rounded-2xl text-2xl font-bold hover:bg-red-700 disabled:opacity-50 transition flex items-center justify-center gap-4 shadow-lg"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="animate-spin w-8 h-8" /> Predicting...
-                </>
-              ) : (
-                "Estimate Property Value"
-              )}
-            </button>
-          </form>
-
-          {result !== null && (
-            <div className="mt-12 text-center bg-gradient-to-br from-red-50 to-red-100 rounded-3xl p-16 shadow-2xl border-t-4 border-red-600">
-              <p className="text-2xl font-semibold text-red-700 mb-4">Estimated Property Value</p>
-              <p className="text-8xl font-bold text-red-800">
-                ${result.toLocaleString()}
-              </p>
-              <p className="text-lg text-gray-600 mt-4">
-                This valuation is generated by an AI model combining real-time market data.
-              </p>
-            </div>
-          )}
         </div>
       </main>
     </div>
