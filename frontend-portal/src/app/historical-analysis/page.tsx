@@ -299,7 +299,7 @@ export default function HistoricalAnalysisPage() {
         {yearlyStats.length > 0 && (
           <div className="bg-white p-8 rounded-2xl shadow-lg">
             <h2 className="text-2xl font-bold text-gray-800 mb-6">
-              📊 Historical Price Trends
+              Historical Price Trends
             </h2>
             <ResponsiveContainer width="100%" height={400}>
               <AreaChart data={yearlyStats}>
@@ -352,7 +352,7 @@ export default function HistoricalAnalysisPage() {
         {yearlyStats.length > 0 && (
           <div className="bg-white p-8 rounded-2xl shadow-lg">
             <h2 className="text-2xl font-bold text-gray-800 mb-6">
-              🏘️ Property Distribution by Year
+              Property Distribution by Year
             </h2>
             <ResponsiveContainer width="100%" height={300}>
               <BarChart data={yearlyStats}>

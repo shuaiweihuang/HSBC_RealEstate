@@ -9,8 +9,8 @@ export const metadata: Metadata = {
 
 function Header() {
   const navItems = [
-    { href: "/estimator", label: "Estimator" },
-    { href: "/market-analysis", label: "Statistics" },
+    { href: "/estimator", label: "Estimator(Python)" },
+    { href: "/market-analysis", label: "Estimator(Java)" },
     { href: "/historical-analysis", label: "Historical Analysis" },
   ];
 

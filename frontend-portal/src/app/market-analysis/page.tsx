@@ -1,419 +1,214 @@
 "use client";
-import { useState, useEffect } from "react";
-import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from "recharts";
-import { TrendingUp, Home, DollarSign, Calendar, Loader2, RefreshCw } from "lucide-react";
+import { useState, useMemo } from "react";
+import { TrendingUp, Loader2 } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { zodResolver } from "@hookform/resolvers/zod";
+import * as z from "zod";
 
-interface MarketStats {
-  averagePrice: number;
-  medianPrice: number;
-  totalVolume: number;
-  priceChangePercent: number;
-  averageSquareFootage: number;
-  oldestYear: number;
-  newestYear: number;
-}
+// --- API Configurations ---
+// Market Data URL is no longer needed but kept for context, though fetchProperties is removed.
+const JAVA_API_URL = "http://localhost:8080"; 
+// This remains the key API endpoint for the What-If tool
+const WHATIF_PROXY_API = "/api/properties/what-if"; 
 
-interface TrendData {
-  year: number;
-  label: string;
-  avgPrice: number;
-  count: number;
-}
+// --- What-if Schema (Matches App 1 for consistency) ---
+const whatIfSchema = z.object({
+  square_footage: z.coerce.number().min(100, "Must be at least 100 sq ft"),
+  bedrooms: z.coerce.number().int().min(1, "Min 1 bedroom").max(10, "Max 10 bedrooms"),
+  bathrooms: z.coerce.number().min(1, "Min 1 bathroom").max(10, "Max 10 bathrooms"),
+  year_built: z.coerce.number().min(1900, "Min 1900").max(new Date().getFullYear(), `Max ${new Date().getFullYear()}`),
+  lot_size: z.coerce.number().min(1000, "Must be at least 1000 sq ft"),
+  distance_to_city_center: z.coerce.number().min(1, "Min 1").max(10, "Max 10"),
+  school_rating: z.coerce.number().min(1, "Min 1").max(10, "Max 10"),
+});
 
-interface BedroomSegment {
-  bedrooms: number;
-  count: number;
-  avgPrice: number;
-  percentage: number;
-}
+type WhatIfFormData = z.infer<typeof whatIfSchema>;
 
-export default function MarketAnalysisPage() {
-  const [marketStats, setMarketStats] = useState<MarketStats | null>(null);
-  const [trendData, setTrendData] = useState<TrendData[]>([]);
-  const [bedroomSegments, setBedroomSegments] = useState<BedroomSegment[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
-
-  const JAVA_API_URL = typeof window !== 'undefined'
-    ? "http://localhost:8080"
-    : (process.env.NEXT_PUBLIC_JAVA_API_URL || "http://java-api:8080");
-
-  // Fetch market statistics
-  const fetchMarketStats = async () => {
-    try {
-      const response = await fetch(`${JAVA_API_URL}/api/market-analysis/stats`);
-      if (response.ok) {
-        const apiResponse = await response.json();
-        setMarketStats(apiResponse.data);
-        setError(null);
-      } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (e) {
-      setError(`Unable to fetch market statistics: ${e instanceof Error ? e.message : 'Unknown error'}`);
+// --- Utility Functions ---
+// Function to handle exponential backoff for API calls
+const fetchWithRetry = async (url: string, options: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
+  try {
+    const response = await fetch(url, options);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
     }
-  };
-
-  // Fetch trend data
-  const fetchTrendData = async () => {
-    try {
-      const response = await fetch(`${JAVA_API_URL}/api/market-analysis/trend`);
-      if (response.ok) {
-        const apiResponse = await response.json();
-        setTrendData(apiResponse.data);
-        setError(null);
-      } else {
-        throw new Error(`HTTP ${response.status}`);
-      }
-    } catch (e) {
-      console.error("Failed to fetch trend data:", e);
+    return response;
+  } catch (error) {
+    if (retries > 0) {
+      // console.log(`Attempt failed. Retrying in ${delay / 1000}s...`);
+      await new Promise(resolve => setTimeout(resolve, delay));
+      return fetchWithRetry(url, options, retries - 1, delay * 2);
     }
-  };
-
-  // Fetch bedroom segments data
-  const fetchBedroomSegments = async () => {
-    try {
-      const response = await fetch(`${JAVA_API_URL}/api/market-analysis/segments/bedrooms`);
-      if (response.ok) {
-        const apiResponse = await response.json();
-        const data = apiResponse.data;
-        
-        // Transform data format
-        const segments: BedroomSegment[] = Object.entries(data).map(([key, value]: [string, any]) => {
-          const bedrooms = parseInt(key.replace('_bedrooms', ''));
-          return {
-            bedrooms,
-            count: value.count,
-            avgPrice: value.avgPrice,
-            percentage: 0 // Calculate later
-          };
-        });
-
-        // Calculate percentages
-        const total = segments.reduce((sum, s) => sum + s.count, 0);
-        segments.forEach(s => s.percentage = (s.count / total) * 100);
-
-        setBedroomSegments(segments.sort((a, b) => a.bedrooms - b.bedrooms));
-        setError(null);
-      }
-    } catch (e) {
-      console.error("Failed to fetch bedroom segments:", e);
-    }
-  };
-
-  // Initial load and periodic refresh
-  useEffect(() => {
-    const loadAllData = async () => {
-      setLoading(true);
-      await Promise.all([
-        fetchMarketStats(),
-        fetchTrendData(),
-        fetchBedroomSegments()
-      ]);
-      setLoading(false);
-      setLastUpdate(new Date());
-    };
-
-    loadAllData();
-    const interval = setInterval(loadAllData, 60000); // Refresh every minute
-
-    return () => clearInterval(interval);
-  }, []);
-
-  // Manual refresh
-  const handleRefresh = async () => {
-    setLoading(true);
-    await Promise.all([
-      fetchMarketStats(),
-      fetchTrendData(),
-      fetchBedroomSegments()
-    ]);
-    setLoading(false);
-    setLastUpdate(new Date());
-  };
-
-  // Chart colors
-  const COLORS = ['#dc2626', '#ea580c', '#d97706', '#65a30d', '#059669', '#0891b2', '#2563eb', '#7c3aed'];
-
-  if (loading && !marketStats) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-center">
-          <Loader2 className="w-16 h-16 animate-spin text-red-600 mx-auto mb-4" />
-          <p className="text-xl text-gray-600">Loading market data...</p>
-        </div>
-      </div>
-    );
+    throw error;
   }
+};
+
+// --- Main Component ---
+export default function MarketAnalysisPage() {
+  // Removed all state related to market data (properties, yearlyStats, loading, error, filters)
+  // Only What-if Tool States remain
+  const [whatIfResult, setWhatIfResult] = useState<number | null>(null);
+  const [whatIfLoading, setWhatIfLoading] = useState(false);
+  const [whatIfError, setWhatIfError] = useState<string | null>(null);
+
+  const {
+    register,
+    handleSubmit,
+    formState: { errors: whatIfErrors },
+  } = useForm<WhatIfFormData>({
+    resolver: zodResolver(whatIfSchema),
+    defaultValues: {
+      square_footage: 1850,
+      bedrooms: 3,
+      bathrooms: 2,
+      year_built: 2005,
+      lot_size: 8200,
+      distance_to_city_center: 4.8,
+      school_rating: 8.7,
+    },
+  });
+
+  // --- What-if Submission Logic (Calling Java Proxy) ---
+  const onWhatIfSubmit = async (data: WhatIfFormData) => {
+    setWhatIfLoading(true);
+    setWhatIfError(null);
+    setWhatIfResult(null);
+
+    // Payload creation
+    const payload = {
+        // Integer (snake_case from @JsonProperty)
+        square_footage: Math.round(Number(data.square_footage)),
+        year_built: Math.round(Number(data.year_built)),
+        lot_size: Math.round(Number(data.lot_size)),
+        
+        // Integer (camelCase, 
+        bedrooms: Math.round(Number(data.bedrooms)),
+        
+        // Double (camelCase/snake_case)
+        bathrooms: Number(data.bathrooms),
+        distance_to_city_center: Number(data.distance_to_city_center),
+        school_rating: Number(data.school_rating),
+    };
+    // --- End payload creation ---
+
+    try {
+      // 
+      const response = await fetchWithRetry(WHATIF_PROXY_API, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const apiResponse = await response.json();
+
+      // 
+      if (response.ok && apiResponse.data?.predicted_price !== undefined) {
+        // 
+        setWhatIfResult(apiResponse.data.predicted_price);
+      } else {
+        // 
+        const validationErrors = apiResponse.error || apiResponse.message || "Unknown validation error.";
+        setWhatIfError(`Prediction failed: ${validationErrors}`);
+      }
+    } catch (err) {
+      console.error("What-if API Error:", err);
+      setWhatIfError("Failed to connect to the Java proxy service. Check Java backend.");
+    } finally {
+      // Note: Setting whatIfLoading to false here, not the global 'loading' state which was removed.
+      setWhatIfLoading(false); 
+    }
+  };
+
+
+  // --- UI Components ---
+  const InputField = ({ name, label, type = "number", errors, isRequired = true }: { 
+    name: keyof WhatIfFormData, 
+    label: string, 
+    type?: string, 
+    errors: any, 
+    isRequired?: boolean 
+  }) => (
+    <div className="flex flex-col">
+      <label htmlFor={name} className="text-sm font-medium text-gray-700 mb-1">
+        {label} {isRequired && <span className="text-red-500">*</span>}
+      </label>
+      <input
+        id={name}
+        type={type}
+        step={name === 'bathrooms' || name === 'school_rating' || name === 'distance_to_city_center' ? "any" : "1"}
+        placeholder={`Enter ${label.toLowerCase()}`}
+        {...register(name)}
+        className={`w-full px-3 py-2 border rounded-lg text-sm transition focus:ring-red-500 focus:border-red-500 ${errors[name] ? 'border-red-500 bg-red-50' : 'border-gray-300'}`}
+      />
+      {errors[name] && <p className="mt-1 text-xs text-red-500">{errors[name]?.message}</p>}
+    </div>
+  );
+  
+  // Since all market data logic (fetchProperties, calculateYearlyStats, useEffect, interfaces) is gone, 
+  // we can also remove the unnecessary imports and constants related to charting/filtering/data.
 
   return (
-    <div className="min-h-screen pb-12">
-      {/* Page Title */}
-      <div className="mb-8">
-        <div className="flex justify-between items-center">
-          <div>
-            <h1 className="text-5xl font-extrabold text-gray-800 mb-2">
-              Market Statistics
-            </h1>
-            <p className="text-xl text-gray-600">
-              Real-time real estate market data and trend analysis
-            </p>
-          </div>
-          <button
-            onClick={handleRefresh}
-            disabled={loading}
-            className="flex items-center gap-2 px-6 py-3 bg-red-600 text-white rounded-xl hover:bg-red-700 disabled:opacity-50 transition"
-          >
-            <RefreshCw className={`w-5 h-5 ${loading ? 'animate-spin' : ''}`} />
-            Refresh Data
-          </button>
-        </div>
-        <p className="text-sm text-gray-500 mt-2">
-          Last Updated: {lastUpdate.toLocaleString('en-US')}
+    <div className="p-4 md:p-8 bg-gray-50 min-h-screen">
+      <header className="mb-8">
+        <h1 className="text-4xl font-extrabold text-gray-900 border-b pb-2">
+          Property Market Analysis Dashboard
+        </h1>
+        <p className="text-lg text-gray-600 mt-2">
+          Interactive insights into property market trends (Java Backend Simulation).
         </p>
-      </div>
-
-      {error && (
-        <div className="bg-red-50 border-l-4 border-red-500 text-red-700 p-4 mb-6 rounded-lg">
-          <p className="font-bold">Data Loading Error</p>
-          <p>{error}</p>
-        </div>
-      )}
-
-      {/* Key Metrics Cards */}
-      {marketStats && (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-          {/* Average Price */}
-          <div className="bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-red-100 rounded-xl">
-                <DollarSign className="w-8 h-8 text-red-600" />
-              </div>
-              <span className={`text-sm font-semibold px-3 py-1 rounded-full ${
-                marketStats.priceChangePercent >= 0 
-                  ? 'bg-green-100 text-green-700' 
-                  : 'bg-red-100 text-red-700'
-              }`}>
-                {marketStats.priceChangePercent >= 0 ? '+' : ''}
-                {marketStats.priceChangePercent.toFixed(2)}%
-              </span>
-            </div>
-            <h3 className="text-sm font-semibold text-gray-600 mb-1">Average Price</h3>
-            <p className="text-3xl font-bold text-gray-800">
-              ${Math.round(marketStats.averagePrice).toLocaleString()}
-            </p>
-          </div>
-
-          {/* Median Price */}
-          <div className="bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-blue-100 rounded-xl">
-                <TrendingUp className="w-8 h-8 text-blue-600" />
-              </div>
-            </div>
-            <h3 className="text-sm font-semibold text-gray-600 mb-1">Median Price</h3>
-            <p className="text-3xl font-bold text-gray-800">
-              ${Math.round(marketStats.medianPrice).toLocaleString()}
-            </p>
-          </div>
-
-          {/* Total Properties */}
-          <div className="bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-green-100 rounded-xl">
-                <Home className="w-8 h-8 text-green-600" />
-              </div>
-            </div>
-            <h3 className="text-sm font-semibold text-gray-600 mb-1">Total Properties</h3>
-            <p className="text-3xl font-bold text-gray-800">
-              {marketStats.totalVolume.toLocaleString()}
-            </p>
-          </div>
-
-          {/* Average Area */}
-          <div className="bg-white p-6 rounded-2xl shadow-lg hover:shadow-xl transition">
-            <div className="flex items-center justify-between mb-4">
-              <div className="p-3 bg-purple-100 rounded-xl">
-                <Calendar className="w-8 h-8 text-purple-600" />
-              </div>
-            </div>
-            <h3 className="text-sm font-semibold text-gray-600 mb-1">Average Area</h3>
-            <p className="text-3xl font-bold text-gray-800">
-              {Math.round(marketStats.averageSquareFootage).toLocaleString()}
-            </p>
-            <p className="text-sm text-gray-500 mt-1">Square Feet</p>
-          </div>
-        </div>
-      )}
-
-      {/* Charts Area */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
-        {/* Annual Average Price Trend */}
-        {trendData.length > 0 && (
-          <div className="bg-white p-8 rounded-2xl shadow-lg">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">
-              Annual Average Price Trend
-            </h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="year" 
-                  label={{ value: 'Year', position: 'insideBottom', offset: -5 }}
-                />
-                <YAxis 
-                  label={{ value: 'Average Price ($)', angle: -90, position: 'insideLeft' }}
-                  tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
-                />
-                <Tooltip 
-                  formatter={(value: any) => [`$${value.toLocaleString()}`, 'Average Price']}
-                  labelFormatter={(label) => `Year ${label}`}
-                />
-                <Legend />
-                <Line 
-                  type="monotone" 
-                  dataKey="avgPrice" 
-                  stroke="#dc2626" 
-                  strokeWidth={3}
-                  name="Average Price"
-                  dot={{ fill: '#dc2626', r: 5 }}
-                  activeDot={{ r: 8 }}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-            <div className="mt-4 text-sm text-gray-600">
-              <p>Data covers {trendData[0]?.year} - {trendData[trendData.length - 1]?.year}</p>
-            </div>
-          </div>
-        )}
-
-        {/* Bedroom Distribution Bar Chart */}
-        {bedroomSegments.length > 0 && (
-          <div className="bg-white p-8 rounded-2xl shadow-lg">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">
-              Bedroom Count Distribution
-            </h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={bedroomSegments}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="bedrooms" 
-                  label={{ value: 'Bedrooms', position: 'insideBottom', offset: -5 }}
-                />
-                <YAxis 
-                  label={{ value: 'Property Count', angle: -90, position: 'insideLeft' }}
-                />
-                <Tooltip 
-                  formatter={(value: any, name: string) => {
-                    if (name === 'count') return [value, 'Properties'];
-                    return [`$${value.toLocaleString()}`, 'Average Price'];
-                  }}
-                  labelFormatter={(label) => `${label} Bedrooms`}
-                />
-                <Legend />
-                <Bar dataKey="count" fill="#dc2626" name="Property Count" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Average Price by Bedroom Count */}
-        {bedroomSegments.length > 0 && (
-          <div className="bg-white p-8 rounded-2xl shadow-lg">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">
-              Average Price by Bedroom Count
-            </h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <BarChart data={bedroomSegments}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis 
-                  dataKey="bedrooms" 
-                  label={{ value: 'Bedrooms', position: 'insideBottom', offset: -5 }}
-                />
-                <YAxis 
-                  label={{ value: 'Average Price ($)', angle: -90, position: 'insideLeft' }}
-                  tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`}
-                />
-                <Tooltip 
-                  formatter={(value: any) => [`$${value.toLocaleString()}`, 'Average Price']}
-                  labelFormatter={(label) => `${label} Bedrooms`}
-                />
-                <Legend />
-                <Bar dataKey="avgPrice" fill="#2563eb" name="Average Price" />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-
-        {/* Market Share Pie Chart */}
-        {bedroomSegments.length > 0 && (
-          <div className="bg-white p-8 rounded-2xl shadow-lg">
-            <h2 className="text-2xl font-bold text-gray-800 mb-6">
-              Market Share by Bedroom Count
-            </h2>
-            <ResponsiveContainer width="100%" height={300}>
-              <PieChart>
-                <Pie
-                  data={bedroomSegments}
-                  cx="50%"
-                  cy="50%"
-                  labelLine={false}
-                  label={({ bedrooms, percentage }) => `${bedrooms} BR (${percentage.toFixed(1)}%)`}
-                  outerRadius={100}
-                  fill="#8884d8"
-                  dataKey="count"
-                >
-                  {bedroomSegments.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip 
-                  formatter={(value: any) => [value, 'Properties']}
-                />
-                <Legend />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-        )}
-      </div>
-
-      {/* Detailed Data Table */}
-      {bedroomSegments.length > 0 && (
-        <div className="mt-8 bg-white p-8 rounded-2xl shadow-lg">
-          <h2 className="text-2xl font-bold text-gray-800 mb-6">
-            Detailed Market Data
+      </header>
+      
+      {/* 僅保留 What-if Analysis Tool，讓它佔滿整個內容區塊 */}
+      <div className="grid grid-cols-1 gap-8 mb-8">
+        
+        {/* --- What-if Analysis Tool --- */}
+        <div className="p-6 bg-white rounded-xl shadow-lg">
+          <h2 className="text-xl font-bold text-blue-600 mb-4 flex items-center">
+              <TrendingUp className="w-5 h-5 mr-2"/> What-If Analysis Tool
           </h2>
-          <div className="overflow-x-auto">
-            <table className="w-full">
-              <thead>
-                <tr className="border-b-2 border-gray-200">
-                  <th className="text-left py-3 px-4 font-semibold text-gray-700">Bedroom Count</th>
-                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Properties</th>
-                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Average Price</th>
-                  <th className="text-right py-3 px-4 font-semibold text-gray-700">Market Share</th>
-                </tr>
-              </thead>
-              <tbody>
-                {bedroomSegments.map((segment, index) => (
-                  <tr key={index} className="border-b border-gray-100 hover:bg-gray-50 transition">
-                    <td className="py-3 px-4">{segment.bedrooms} Bedrooms</td>
-                    <td className="text-right py-3 px-4">{segment.count.toLocaleString()}</td>
-                    <td className="text-right py-3 px-4 font-semibold text-blue-600">
-                      ${Math.round(segment.avgPrice).toLocaleString()}
-                    </td>
-                    <td className="text-right py-3 px-4">
-                      <span className="px-3 py-1 bg-gray-100 rounded-full text-sm">
-                        {segment.percentage.toFixed(1)}%
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <p className="text-gray-600 mb-4 text-sm">
+            Simulate the predicted value of a custom property configuration using the core ML model.
+          </p>
+          <form onSubmit={handleSubmit(onWhatIfSubmit)} className="space-y-4">
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <InputField name="square_footage" label="Sq Footage" errors={whatIfErrors} />
+              <InputField name="bedrooms" label="Bedrooms" errors={whatIfErrors} />
+              <InputField name="bathrooms" label="Bathrooms" errors={whatIfErrors} />
+              <InputField name="year_built" label="Year Built" errors={whatIfErrors} />
+              <InputField name="lot_size" label="Lot Size" errors={whatIfErrors} />
+              <InputField name="distance_to_city_center" label="Distance to City Center" errors={whatIfErrors} />
+              <InputField name="school_rating" label="School Rating" errors={whatIfErrors} />
+              <div className="flex items-end pt-2">
+                <button
+                    type="submit"
+                    disabled={whatIfLoading}
+                    className="w-full py-2 bg-blue-500 text-white font-semibold rounded-lg hover:bg-blue-600 transition disabled:opacity-50 flex items-center justify-center gap-2"
+                >
+                    {whatIfLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : 'Predict'}
+                </button>
+              </div>
+            </div>
+          </form>
+
+          {whatIfError && (
+              <div className="mt-4 text-center bg-red-100 border-l-4 border-red-500 text-red-700 p-3 rounded-lg text-sm" role="alert">
+                  <p>{whatIfError}</p>
+              </div>
+          )}
+
+          {whatIfResult !== null && (
+              <div className="mt-6 text-center bg-blue-50 rounded-lg p-6 border border-blue-200">
+                  <p className="text-xl text-blue-600 font-semibold mb-2">Predicted Value:</p>
+                  <p className="text-4xl font-black text-blue-700">
+                      ${whatIfResult.toLocaleString()}
+                  </p>
+              </div>
+          )}
         </div>
-      )}
+      </div>
+      
+      {/* 由於所有數據相關的區塊都被移除，這裡只留下 What-If Tool */}
+      
     </div>
   );
 }
