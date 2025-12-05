@@ -4,8 +4,11 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import * as z from "zod";
 import { Loader2 } from "lucide-react";
+// *** 新增 Recharts 引用 ***
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+// *************************
 
-// The API endpoint for prediction (使用本地 Fast-API 服務)
+// The ML API URL is used directly since it's a microservice in the same environment.
 const API_URL = "http://localhost:8000/predict";
 
 // 1. Define the Schema for input validation
@@ -21,6 +24,13 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>;
 
+interface PredictionHistory extends FormData {
+    id: number;
+    predictedPrice: number;
+    timestamp: number;
+}
+
+
 // Function to handle exponential backoff for API calls
 const fetchWithRetry = async (url: string, options: RequestInit, retries = 3, delay = 1000): Promise<Response> => {
   try {
@@ -31,7 +41,7 @@ const fetchWithRetry = async (url: string, options: RequestInit, retries = 3, de
     return response;
   } catch (error) {
     if (retries > 0) {
-      // console.log(`Attempt failed. Retrying in ${delay / 1000}s...`); // Do not log retries as errors
+      // console.log(`Attempt failed. Retrying in ${delay / 1000}s...`);
       await new Promise(resolve => setTimeout(resolve, delay));
       return fetchWithRetry(url, options, retries - 1, delay * 2);
     }
@@ -39,16 +49,25 @@ const fetchWithRetry = async (url: string, options: RequestInit, retries = 3, de
   }
 };
 
+const formatFeatureName = (name: string): string => {
+    const formatted = name.replace(/([A-Z])/g, ' $1').toLowerCase();
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+}
+
 // 2. Main Estimator Component
 export default function Estimator() {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [history, setHistory] = useState<PredictionHistory[]>([]);
+  
+  const MARKET_TRAINING_MEAN_PRICE = 270375; 
 
   const {
     register,
     handleSubmit,
     formState: { errors },
+    getValues,
   } = useForm<FormData>({
     resolver: zodResolver(schema),
     defaultValues: {
@@ -92,9 +111,19 @@ export default function Estimator() {
       const responseData = await response.json();
 
       if (response.ok && responseData.predicted_price !== undefined) {
-        setResult(responseData.predicted_price);
+        const predictedPrice = responseData.predicted_price;
+        setResult(predictedPrice);
+
+        const newEntry: PredictionHistory = {
+            id: Date.now(),
+            ...data, 
+            predictedPrice: predictedPrice,
+            timestamp: Date.now(),
+        };
+        setHistory(prev => [newEntry, ...prev.slice(0, 9)]); 
+        // **********************************
+
       } else {
-        // Handle case where API returns a non-error status but the structure is wrong
         setError(responseData.detail || "Prediction API failed to return a valid price.");
       }
     } catch (err) {
@@ -120,6 +149,11 @@ export default function Estimator() {
       {errors[name] && <p className="mt-2 text-sm text-red-500 font-medium">{errors[name]?.message}</p>}
     </div>
   );
+
+  const chartData = result !== null ? [
+      { name: 'Predicted Price', value: result, color: '#DC2626' },
+      { name: 'Market Average', value: MARKET_TRAINING_MEAN_PRICE, color: '#FCD34D' },
+  ] : [];
 
   return (
     <div className="max-w-4xl mx-auto p-8 bg-white rounded-3xl shadow-2xl">
@@ -170,9 +204,101 @@ export default function Estimator() {
             ${result.toLocaleString()}
           </p>
           <p className="text-4xl text-red-700 mt-6 font-bold">Estimated Property Value</p>
+          
+          <div className="mt-10 max-w-lg mx-auto p-6 bg-white rounded-2xl shadow-xl border border-red-200 text-left">
+              <h3 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Input Details Summary</h3>
+              <div className="grid grid-cols-2 gap-y-3 gap-x-4 text-sm">
+                  {Object.entries(getValues()).map(([key, value]) => (
+                      <div key={key} className="flex justify-between items-center border-b last:border-b-0 py-1">
+                          <span className="font-semibold text-gray-600">{formatFeatureName(key)}:</span>
+                          <span className="font-bold text-gray-900">
+                              {value} {key === 'square_footage' || key === 'lot_size' ? 'sq ft' : ''}
+                          </span>
+                      </div>
+                  ))}
+              </div>
+          </div>
+          {/* ********************************* */}
+
+          <div className="mt-10 w-full p-6 bg-white rounded-2xl shadow-xl border border-red-200">
+            <h3 className="text-2xl font-bold text-gray-800 mb-4 border-b pb-2">Market Comparison</h3>
+            <div className="h-64">
+                <ResponsiveContainer width="100%" height="100%">
+                    <BarChart
+                        data={chartData}
+                        margin={{ top: 5, right: 30, left: 20, bottom: 5 }}
+                    >
+                        <CartesianGrid strokeDasharray="3 3" stroke="#e0e0e0"/>
+                        <XAxis dataKey="name" stroke="#374151" />
+                        <YAxis tickFormatter={(value) => `$${(value / 1000).toLocaleString()}k`} stroke="#374151" />
+                        <Tooltip 
+                            formatter={(value: number) => [`$${value.toLocaleString()}`, 'Price']} 
+                            labelFormatter={(label) => label} 
+                        />
+                        <Legend />
+                        <Bar dataKey="value" name="Price" fill="#DC2626" radius={[10, 10, 0, 0]} />
+                    </BarChart>
+                </ResponsiveContainer>
+            </div>
+            <p className="text-xs text-gray-400 mt-2">Comparison of predicted value vs. the training dataset's average price ($270,375).</p>
+          </div>
+          {/* ***************************** */}
+
           <p className="text-sm text-gray-500 mt-4">Prediction based on current ML model.</p>
         </div>
       )}
+      
+      {history.length > 0 && (
+          <div className="mt-16 border-t pt-8">
+              <h2 className="text-3xl font-extrabold text-gray-800 mb-8 text-center">Estimation History</h2>
+              
+              <div className="overflow-x-auto rounded-xl shadow-lg">
+                  <table className="min-w-full divide-y divide-red-200">
+                      <thead className="bg-red-50">
+                          <tr>
+                              <th className="px-6 py-4 text-left text-xs font-semibold text-red-600 uppercase tracking-wider">Time</th>
+                              <th className="px-6 py-4 text-left text-xs font-semibold text-red-600 uppercase tracking-wider">Sq Footage</th>
+                              <th className="px-6 py-4 text-left text-xs font-semibold text-red-600 uppercase tracking-wider">Beds/Baths</th>
+                              <th className="px-6 py-4 text-left text-xs font-semibold text-red-600 uppercase tracking-wider">Year</th>
+                              <th className="px-6 py-4 text-right text-xs font-semibold text-red-600 uppercase tracking-wider">Predicted Price</th>
+                              <th className="px-6 py-4 text-center text-xs font-semibold text-red-600 uppercase tracking-wider">Action</th>
+                          </tr>
+                      </thead>
+                      <tbody className="bg-white divide-y divide-gray-100">
+                          {history.map((item) => (
+                              <tr key={item.id} className="hover:bg-red-50 transition duration-150">
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
+                                      {new Date(item.timestamp).toLocaleTimeString()}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
+                                      {item.square_footage.toLocaleString()}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                      {item.bedrooms} / {item.bathrooms}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">
+                                      {item.year_built}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-right text-base font-bold text-red-700">
+                                      ${item.predictedPrice.toLocaleString()}
+                                  </td>
+                                  <td className="px-6 py-4 whitespace-nowrap text-center text-sm">
+                                      {/* 這裡是實現 a.v (比較視圖) 的起點 */}
+                                      <button 
+                                          className="text-red-600 hover:text-red-900 font-medium disabled:text-gray-400"
+                                          // onClick={() => selectForComparison(item)} 
+                                      >
+                                          Compare
+                                      </button>
+                                  </td>
+                              </tr>
+                          ))}
+                      </tbody>
+                  </table>
+              </div>
+          </div>
+      )}
+      
     </div>
   );
 }
