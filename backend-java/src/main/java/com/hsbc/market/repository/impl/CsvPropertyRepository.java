@@ -57,16 +57,9 @@ public class CsvPropertyRepository implements PropertyRepository {
         Resource resource = null;
         
         try {
-            // 嘗試方法 1: 作為文件系統路徑
-            if (Files.exists(Paths.get(csvPath))) {
-                log.info("Loading CSV from file system: {}", csvPath);
-                resource = new FileSystemResource(csvPath);
-            } 
-            // 嘗試方法 2: 作為 ClassPath 資源
-            else {
-                log.info("Loading CSV from classpath: {}", csvPath);
-                resource = new ClassPathResource(csvPath);
-            }
+
+            log.info("Loading CSV from classpath: {}", csvPath);
+            resource = new ClassPathResource(csvPath);
             
             if (!resource.exists()) {
                 throw new DataNotFoundException("CSV file not found at: " + csvPath);

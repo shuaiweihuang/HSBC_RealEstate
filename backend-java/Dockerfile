@@ -17,8 +17,6 @@ RUN ./mvnw dependency:go-offline
 
 # 2. 複製原始碼及資源檔 (確保 application.properties 被複製)
 COPY src ./src
-# 複製 Data 資料夾到容器的 /app/data
-COPY data ./data
 
 # 3. 建置 JAR (並完全跳過測試編譯和執行以加速並避免編譯錯誤)
 RUN ./mvnw package -Dmaven.test.skip=true
