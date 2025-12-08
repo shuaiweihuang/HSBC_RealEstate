@@ -54,17 +54,29 @@ public class MlApiClient {
      */
     public Mono<ModelInfo> getModelInfo() {
         log.debug("Requesting model info from ML API");
+
         return webClient.get()
                 .uri("/model-info")
                 .retrieve()
                 .bodyToMono(ModelInfo.class)
-                .doOnSuccess(info -> log.debug("Model info received: {}", info.getModelVersion())) 
+                .doOnSuccess(info -> {
+                    log.info("ML Model Info Loaded Successfully");
+                    log.info("   Target            : {}", info.getTarget());
+                    log.info("   Test R²           : ${}", String.format("%,.4f", info.getTestR2()));
+                    log.info("   Test MAE          : ${}", String.format("%,.0f", info.getTestMae()));
+                    log.info("   Train/Test Split  : {} / {}", info.getTrainSamples(), info.getTestSamples());
+                    if (info.getTopFeatures() != null && !info.getTopFeatures().isEmpty()) {
+                        var top = info.getTopFeatures().get(0);
+                        log.info("   #1 Feature        : {} (impact: ${})", 
+                                 top.getFeature(), 
+                                 String.format("%,.0f", top.getImpact()));
+                    }
+                })
                 .onErrorResume(e -> {
-                    log.error("Failed to get model info", e);
+                    log.warn("Failed to fetch model info (ML API may be starting up): {}", e.getMessage());
                     return Mono.empty();
                 });
     }
-
     /**
      * 獲取單個物業的價格預測
      * @param request 預測請求數據

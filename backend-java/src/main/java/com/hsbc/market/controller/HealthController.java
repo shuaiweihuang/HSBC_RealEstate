@@ -35,7 +35,10 @@ public class HealthController {
     @GetMapping("/health")
     public ResponseEntity<ApiResponse<Map<String, Object>>> checkHealth() {
         log.debug("Health check requested");
-        
+        mlApiClient.getModelInfo().subscribe(
+                info -> {},
+                error -> log.warn("ML API not ready: {}", error.getMessage())
+            );        
         Map<String, Object> healthStatus = new HashMap<>();
         healthStatus.put("status", "UP");
         healthStatus.put("application", "HSBC Market Analysis API");

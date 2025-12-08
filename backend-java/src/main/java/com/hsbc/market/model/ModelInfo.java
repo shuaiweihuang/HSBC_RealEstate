@@ -6,53 +6,59 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 
-import java.io.Serializable;
+import java.util.List;
 import java.util.Map;
 
 /**
- * ML 模型資訊
+ * 對應 Python ML API /model-info 端點的回傳結構
  */
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ModelInfo implements Serializable {
-    
-    @JsonProperty("model_name")
-    private String modelName;
-    
-    @JsonProperty("model_version")
-    private String modelVersion;
-    
-    @JsonProperty("trained_at")
-    private String trainedAt;
-    
-    @JsonProperty("n_features")
-    private Integer nFeatures;
-    
-    @JsonProperty("feature_names")
-    private String[] featureNames;
-    
-    @JsonProperty("performance")
-    private PerformanceMetrics performance;
-    
-    @JsonProperty("coefficients")
+public class ModelInfo {
+
+    private String target;
+
+    @JsonProperty("features_used")
+    private List<String> featuresUsed;
+
+    @JsonProperty("n_samples")
+    private Integer nSamples;
+
+    @JsonProperty("train_samples")
+    private Integer trainSamples;
+
+    @JsonProperty("test_samples")
+    private Integer testSamples;
+
+    @JsonProperty("train_mae")
+    private Double trainMae;
+
+    @JsonProperty("test_mae")
+    private Double testMae;
+
+    @JsonProperty("train_r2")
+    private Double trainR2;
+
+    @JsonProperty("test_r2")
+    private Double testR2;
+
     private Map<String, Double> coefficients;
-    
+
+    @JsonProperty("top_features")
+    private List<TopFeature> topFeatures;
+
+    /**
+     * 單一特徵影響力
+     */
     @Data
     @NoArgsConstructor
     @AllArgsConstructor
-    public static class PerformanceMetrics implements Serializable {
-        @JsonProperty("r2_score")
-        private Double r2Score;
+    public static class TopFeature {
+        private String feature;
         
-        @JsonProperty("mse")
-        private Double mse;
-        
-        @JsonProperty("rmse")
-        private Double rmse;
-        
-        @JsonProperty("mae")
-        private Double mae;
+        @JsonProperty("impact")
+        private Double impact;
     }
 }
