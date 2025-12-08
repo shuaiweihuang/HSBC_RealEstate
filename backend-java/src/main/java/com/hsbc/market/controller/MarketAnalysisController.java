@@ -58,19 +58,4 @@ public class MarketAnalysisController {
             ApiResponse.success("Market trend data retrieved successfully", trend)
         );
     }
-    
-    @GetMapping("/segments/bedrooms")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> getStatsByBedrooms() {
-        log.info("Received request for bedroom segments");
-        
-        Map<String, Object> segments = Map.of(
-            "2_bedrooms", Map.of("count", 15, "avgPrice", 185000),
-            "3_bedrooms", Map.of("count", 25, "avgPrice", 255000),
-            "4_bedrooms", Map.of("count", 10, "avgPrice", 375000)
-        );
-        
-        return ResponseEntity.ok(
-            ApiResponse.success("Bedroom segments retrieved successfully", segments)
-        );
-    }
 }

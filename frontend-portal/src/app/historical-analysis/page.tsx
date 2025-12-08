@@ -34,11 +34,11 @@ export default function HistoricalAnalysisPage() {
   // Filter conditions
   const [filters, setFilters] = useState({
     yearFrom: 1950,
-    yearTo: 2022,
+    yearTo: 2025,
     bedroomsMin: 1,
     bedroomsMax: 10,
-    priceMin: 0,
-    priceMax: 1000000,
+    priceMin: 100000,
+    priceMax: 800000,
   });
 
   const JAVA_API_URL = typeof window !== 'undefined'

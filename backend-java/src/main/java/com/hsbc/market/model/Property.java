@@ -19,8 +19,6 @@ import java.io.Serializable;
 @Slf4j // 添加 Slf4j
 public class Property implements Serializable {
     
-    private static final long serialVersionUID = 1L;
-    
     /**
      * 唯一識別碼
      */
@@ -127,22 +125,5 @@ public class Property implements Serializable {
             log.error("Error creating Property from CSV row: {}", String.join(",", row), e);
             return null;
         }
-    }
-    
-    /**
-     * 轉換為 CSV 行
-     */
-    public String[] toCsvRow() {
-        return new String[]{
-            String.valueOf(id),
-            String.valueOf(squareFootage),
-            String.valueOf(bedrooms),
-            String.valueOf(bathrooms),
-            String.valueOf(yearBuilt),
-            String.valueOf(lotSize),
-            String.valueOf(distanceToCityCenter),
-            String.valueOf(schoolRating),
-            String.valueOf(price)
-        };
     }
 }

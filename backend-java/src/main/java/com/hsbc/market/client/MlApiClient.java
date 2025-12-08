@@ -91,29 +91,6 @@ public class MlApiClient {
     }
 
     /**
-     * 獲取批次預測
-     */
-    public Mono<Map<String, Object>> getBatchPrediction(Map<String, Object> features) {
-        log.debug("Sending batch prediction request to ML API");
-        
-        return webClient.post()
-                .uri("/predict-batch")
-                .bodyValue(features)
-                .retrieve()
-                .bodyToMono(new ParameterizedTypeReference<Map<String, Object>>() {})
-                .doOnSuccess(response -> log.debug("Received batch prediction response"))
-                .onErrorResume(WebClientResponseException.class, e -> {
-                    log.error("Batch prediction error: {} - {}\nRequest Body: {}", 
-                              e.getStatusCode(), e.getResponseBodyAsString(), features);
-                    return Mono.error(new MlApiException("Batch prediction failed", e));
-                })
-                .onErrorResume(Exception.class, e -> {
-                    log.error("Error during batch prediction: {}", e.getMessage());
-                    return Mono.error(new MlApiException("Batch prediction error", e));
-                });
-    }
-    
-    /**
      * 健康檢查
      */
     public Mono<String> checkHealth() {

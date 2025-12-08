@@ -62,11 +62,11 @@ public class PredictionRequest {
     private Integer lotSize;
     
     /**
-     * 距離市中心距離（公里）
+     * 距離市中心評分
      */
     @NotNull(message = "Distance to city center is required")
-    @Min(value = 0, message = "Distance cannot be negative")
-    @Max(value = 100, message = "Distance must not exceed 100km")
+    @Min(value = 0, message = "City center rating cannot be negative")
+    @Max(value = 10, message = "City center rating must not exceed 10")
     @JsonProperty("distance_to_city_center")
     private Double distanceToCityCenter;
     

@@ -1,6 +1,5 @@
 package com.hsbc.market.service;
 
-import com.hsbc.market.client.MlApiClient;
 import com.hsbc.market.dto.response.MarketStatsResponse;
 import com.hsbc.market.dto.response.TrendDataResponse;
 import com.hsbc.market.exception.DataNotFoundException;
@@ -26,7 +25,6 @@ import java.util.stream.Collectors;
 public class MarketAnalysisService {
     
     private final PropertyRepository propertyRepository;
-    private final MlApiClient mlApiClient;
     
     /**
      * 獲取市場整體統計
