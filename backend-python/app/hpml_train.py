@@ -1,11 +1,6 @@
 """
 House Price ML – Train a clean, production-ready regression model
 
-Strictly prevents data leakage by:
-- Hard-coded allow-list of business-meaningful features only
-- Automatic detection and removal of ID-like columns
-- No train-test contamination
-
 Allowed features:
     square_footage, bedrooms, bathrooms, year_built,
     lot_size, distance_to_city_center, school_rating
@@ -50,8 +45,6 @@ def hpml_train(
     target_name: Optional[str] = None,
 ) -> None:
     """
-    Train a leakage-free Ridge regression model on housing data.
-
     Args:
         data_path: Path to training CSV
         model_path: Where to save the trained joblib bundle
@@ -64,7 +57,7 @@ def hpml_train(
     # === Feature Engineering: Convert to Age of House ===
     df["age_of_house"] = CURRENT_YEAR - df["year_built"]
     
-    # === ADDED: Additional Feature Engineering ===
+    # === Additional Feature Engineering ===
     # Interaction features
     if "square_footage" in df.columns and "bedrooms" in df.columns:
         df["size_per_bedroom"] = df["square_footage"] / (df["bedrooms"] + 1)
@@ -87,8 +80,10 @@ def hpml_train(
         df["lot_size_sq"] = df["lot_size"] ** 2
     
     # Categorical features
+    age_threshold = 15
     if "age_of_house" in df.columns:
-        df["is_new_house"] = (df["age_of_house"] <= 5).astype(int)
+        age_threshold = df["age_of_house"].quantile(0.25)
+        df["is_new_house"] = (df["age_of_house"] <= age_threshold).astype(int)
     
     if "square_footage" in df.columns:
         median_size = df["square_footage"].median()
@@ -97,9 +92,7 @@ def hpml_train(
     
     # Determine features to use
     target = target_name or "price"
-    # MODIFIED: Expand allowed features list with engineered features
     ALLOWED_FEATURES_TRAIN = ALLOWED_FEATURES.union({"age_of_house"}) - {"year_built"}
-    # Add engineered features to allowed list
     ALLOWED_FEATURES_TRAIN = ALLOWED_FEATURES_TRAIN.union({
         "size_per_bedroom", "bathroom_bedroom_ratio", "total_rooms", "quality_score",
         "square_footage_sq", "lot_size_sq", "is_new_house", "large_house"
@@ -117,16 +110,13 @@ def hpml_train(
     # 2. Preprocessing Pipeline Definition
     features_to_scale = list(ALLOWED_FEATURES_TRAIN) 
     
-    # Categorical features (none currently, but structure is preserved)
-    # categorical_features = []
-
     # 3. ColumnTransformer (Preprocessing Steps)
     preprocessor = ColumnTransformer(
         transformers=[
             ('num', StandardScaler(), features_to_scale),
             # ('cat', OneHotEncoder(handle_unknown='ignore'), categorical_features)
         ],
-        remainder='drop'
+        remainder='drop' # ex.id
     )
 
     # 4. Full Pipeline (Preprocessing + Model)
@@ -184,8 +174,34 @@ def hpml_train(
         "top_5_important_features": [
             {"feature": name.replace("num__", ""), "coefficient": float(coef)} 
             for name, coef in coef_importance[:5]
-        ]
+        ],
+        "is_new_house_age_threshold": float(age_threshold),
     }
+
+    # --- Sample Feature Detection Output (與上一次修改相同) ---
+    print("\n" + "="*60)
+    print("      SAMPLE FEATURE DETECTION (Test Set)")
+    print("="*60)
+    
+    sample_df = X_test.head(10).copy()
+    
+    if 'is_new_house' in sample_df.columns and 'age_of_house' in sample_df.columns:
+        
+        display_df = sample_df[['age_of_house', 'is_new_house']]
+        
+        threshold_to_display = meta["is_new_house_age_threshold"]
+        
+        print(f"** Dynamic 'New House' Age Threshold: Age <= {threshold_to_display:.2f} years **")
+        print("\nTest Sample Results:")
+        
+        for index, row in display_df.iterrows():
+            is_new = "(Newest 25%)" if row['is_new_house'] == 1 else "(Older 75%)"
+            print(f"  Sample ID: {index} | Age: {row['age_of_house']:.1f} years | Status: {is_new}")
+    else:
+        print("Feature 'is_new_house' or 'age_of_house' not found in test set, skipping sample detection.")
+        
+    print("="*60)
+    # --- Sample Feature Detection Output 結束 ---
 
     # 9. Save model bundle
     bundle = {

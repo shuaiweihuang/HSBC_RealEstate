@@ -48,7 +48,7 @@ def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
     
     # Categorical features
     if "age_of_house" in df.columns:
-        df["is_new_house"] = (df["age_of_house"] <= 5).astype(int)
+        df["is_new_house"] = (df["age_of_house"] <= 20).astype(int)
     
     if "square_footage" in df.columns:
         median_size = df["square_footage"].median() # NOTE: This uses the median of the PREDICTION data, which is acceptable in this case as it's not a scaling/transformation fit
@@ -131,7 +131,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--data",
         type=Path,
-        default=Path("data/raw/HousePriceDataset.csv"),
+        default=Path("data/raw/TestDataForPrediction.csv"),
         help="Path to dataset for prediction (CSV)"
     )
     args = parser.parse_args()

@@ -112,7 +112,7 @@ def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
     if "bedrooms" in df_processed.columns and "bathrooms" in df_processed.columns:
         df_processed["total_rooms"] = df_processed["bedrooms"] + df_processed["bathrooms"]
     if "school_rating" in df_processed.columns and "distance_to_city_center" in df_processed.columns:
-        df_processed["quality_score"] = df_processed["school_rating"] * (1 / (df_processed["distance_to_city_center"] + 0.1))
+        df_processed["quality_score"] = df_processed["school_rating"] * df_processed["distance_to_city_center"]
 
     # 3. Polynomial features
     if "square_footage" in df_processed.columns:
@@ -122,7 +122,7 @@ def preprocess_features(df: pd.DataFrame) -> pd.DataFrame:
 
     # 4. Categorical features derived from continuous ones
     if "age_of_house" in df_processed.columns:
-        df_processed["is_new_house"] = (df_processed["age_of_house"] <= 5).astype(int)
+        df_processed["is_new_house"] = (df_processed["age_of_house"] <= 20).astype(int)
     if "square_footage" in df_processed.columns:
         # Use the median from training metadata for consistency
         # Fallback to current batch's median if not in metadata (for robustness)

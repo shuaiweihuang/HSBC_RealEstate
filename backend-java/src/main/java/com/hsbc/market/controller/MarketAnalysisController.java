@@ -34,13 +34,13 @@ public class MarketAnalysisController {
         
         // 臨時使用 MarketStatsResponse 實例化數據
         MarketStatsResponse stats = MarketStatsResponse.builder()
-            .averagePrice(260000.0)
-            .medianPrice(250000.0)
+            .averagePrice(264600.0)
+            .medianPrice(245000.0)
             .totalVolume(50L)
             .priceChangePercent(2.5)
-            .averageSquareFootage(1800.0)
-            .oldestYear(1950)
-            .newestYear(2022)
+            .averageSquareFootage(1690.0)
+            .oldestYear(1978)
+            .newestYear(2012)
             .build();
         
         return ResponseEntity.ok(
